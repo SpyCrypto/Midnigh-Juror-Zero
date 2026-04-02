@@ -1,9 +1,6 @@
 # Midnight Juror Zero
 
-Juror Zero, is a privacy-preserving jury / verdict system built on **Midnight Network** using
-zero-knowledge (ZK) proofs. Votes are hidden via ZK witnesses only the tally
-is updated on-chain, never individual choices. The system includes a composability
-bridge so any other dApp can attach to a jury and receive verified verdicts.
+Juror Zero, is a privacy-preserving jury verdict system built on **Midnight Network** using zero-knowledge (ZK) proofs. Juror Votes are hidden via ZK witnesses only the tally is updated on-chain, never individual choices. Juror Personal information required to determine eligibility and for jury selection. Juror Zero includes a composability bridge so any other dApp can attach to a jury and receive verified verdicts.
 
 ---
 
