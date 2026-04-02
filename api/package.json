@@ -1,0 +1,26 @@
+{
+  "name": "@midnight-jury/api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "rxjs": "^7.8.1"
+  },
+  "optionalDependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.9.0",
+    "@midnight-ntwrk/midnight-js-contracts": "0.2.0",
+    "@midnight-ntwrk/midnight-js-crypto": "0.2.0",
+    "@midnight-ntwrk/midnight-js-network-id": "0.2.0",
+    "@midnight-ntwrk/midnight-js-types": "0.2.0",
+    "@midnight-ntwrk/midnight-js-wallet": "0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.0",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@midnight-jury/contract",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "compile": "compactc src/jury.compact dist/jury && compactc src/jury-bridge.compact dist/jury-bridge",
+    "build": "npm run compile"
+  },
+  "devDependencies": {}
+}

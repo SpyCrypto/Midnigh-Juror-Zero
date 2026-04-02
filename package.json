@@ -1,0 +1,16 @@
+{
+  "name": "midnight-jury-dapp",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "contract",
+    "api",
+    "ui"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=ui",
+    "build": "npm run build --workspaces --if-present",
+    "compile:contracts": "npm run compile --workspace=contract",
+    "test": "npm test --workspaces --if-present"
+  }
+}

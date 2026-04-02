@@ -1,0 +1,258 @@
+pragma language_version >= 0.14.0;
+
+import CompactStandardLibrary;
+
+// ─── Enumerations ─────────────────────────────────────────────────────────────
+
+export enum JuryStatus {
+  Open,         // Case is open for juror enrollment
+  Deliberating, // Jury is voting
+  Closed        // Verdict has been finalized
+}
+
+export enum Verdict {
+  Pending,   // No verdict yet
+  Guilty,    // ≥ 2/3 voted guilty
+  NotGuilty, // ≥ 2/3 voted not guilty
+  Hung       // No supermajority reached
+}
+
+// ─── On-chain Ledger State ────────────────────────────────────────────────────
+//
+//  All fields here are part of the Merkleized contract state stored on-chain.
+//  Maps are sparse; accessing an absent key returns the zero value.
+
+export ledger {
+  // Case identification
+  caseId:           Bytes<32>;
+  caseTitle:        Bytes<64>;
+  plaintiff:        Bytes<32>;
+  defendant:        Bytes<32>;
+
+  // Jury seat configuration
+  requiredJurors:   Uint<32>;
+  enrolledCount:    Counter;
+
+  // Vote tallies — incremented inside ZK circuits so individual votes stay private
+  guiltyVotes:      Counter;
+  notGuiltyVotes:   Counter;
+
+  // Jury instructions — set by the case initiator before deliberation begins.
+  // The full text is stored off-chain (IPFS / arweave); the 32-byte SHA-256
+  // hash is committed on-chain so jurors can verify integrity.
+  // juryInstructions holds up to 256 bytes of inline summary text.
+  juryInstructions:     Bytes<256>;
+  instructionsHash:     Bytes<32>;   // SHA-256 of full off-chain document
+  instructionsSet:      Boolean;     // true once instructions are finalised
+  acknowledgedCount:    Counter;     // jurors who have acknowledged instructions
+
+  // Life-cycle tracking
+  status:           JuryStatus;
+  verdict:          Verdict;
+
+  // Registered jurors: juror-address (Bytes<32>) → enrolled?
+  jurors:           Map<Bytes<32>, Boolean>;
+
+  // Vote-cast tracking: juror-address → has-voted?
+  votedMap:         Map<Bytes<32>, Boolean>;
+
+  // ── Composability layer ───────────────────────────────────────────────────
+  // Attached dApp registry: dapp-id (Bytes<32>) → active?
+  attachedDapps:    Map<Bytes<32>, Boolean>;
+  dappCount:        Counter;
+
+  // Optional: the most-recently finalised verdict is mirrored here so that
+  // attached dApps can query it without additional round-trips.
+  lastVerdictBlock: Uint<64>;
+}
+
+// ─── Private Witnesses ────────────────────────────────────────────────────────
+//
+//  Witnesses supply ZK-private inputs.  They are provided by the caller and
+//  are NEVER revealed on-chain; only the proof that the circuit executed
+//  correctly with valid private inputs is stored.
+
+witness callerAddress(): Bytes<32>;      // Caller's on-chain identity (private)
+witness privateVote(): Boolean;          // true = Guilty, false = Not Guilty
+
+// Juror acknowledgement witness (private: juror confirms they read the instructions)
+witness instructionsRead(): Boolean;
+
+// ─── Internal Helpers ─────────────────────────────────────────────────────────
+
+circuit assertOpen(): [] {
+  assert ledger.status == JuryStatus.Open "Case is not in the Open phase";
+}
+
+circuit assertDeliberating(): [] {
+  assert ledger.status == JuryStatus.Deliberating "Case is not deliberating";
+}
+
+// ─── Public Circuits (callable transactions) ─────────────────────────────────
+
+// Initialize a new jury case.
+// Must be called exactly once before any other interaction.
+export circuit initializeCase(
+  caseId:         Bytes<32>,
+  caseTitle:      Bytes<64>,
+  plaintiff:      Bytes<32>,
+  defendant:      Bytes<32>,
+  requiredJurors: Uint<32>
+): [] {
+  assert ledger.status == JuryStatus.Open "Case already initialized";
+  assert requiredJurors > 0 "Must require at least one juror";
+
+  ledger.caseId         = caseId;
+  ledger.caseTitle      = caseTitle;
+  ledger.plaintiff      = plaintiff;
+  ledger.defendant      = defendant;
+  ledger.requiredJurors = requiredJurors;
+  ledger.status         = JuryStatus.Open;
+  ledger.verdict        = Verdict.Pending;
+}
+
+// Enroll the caller as a juror.
+// The caller's address is provided as a private witness (ZK-hidden from observers).
+export circuit enrollJuror(): [] {
+  assertOpen();
+  const addr: Bytes<32> = callerAddress();
+  assert !ledger.jurors[addr] "Address is already enrolled as a juror";
+  ledger.jurors[addr] = true;
+  increment ledger.enrolledCount;
+}
+
+// Set or update jury instructions (only while case is Open).
+// `summary`  — up to 256 bytes of plain-text instruction summary stored on-chain.
+// `docHash`  — SHA-256 hash of the full instruction document (verified off-chain).
+export circuit setInstructions(
+  summary: Bytes<256>,
+  docHash: Bytes<32>
+): [] {
+  assertOpen();
+  ledger.juryInstructions = summary;
+  ledger.instructionsHash  = docHash;
+  ledger.instructionsSet   = true;
+}
+
+// Juror calls this to record that they have read and understood the instructions.
+// The actual confirmation is a ZK witness — the juror proves knowledge without
+// revealing which specific juror is acknowledging.
+export circuit acknowledgeInstructions(): [] {
+  assert ledger.instructionsSet "Instructions have not been set yet";
+  assert ledger.status == JuryStatus.Open "Acknowledgement window is closed";
+  const confirmed: Boolean = instructionsRead();
+  assert confirmed "Juror must confirm they have read the instructions";
+  increment ledger.acknowledgedCount;
+}
+
+// Transition the case from enrollment to active deliberation.
+// Callable by anyone once the required number of jurors are enrolled.
+export circuit startDeliberation(): [] {
+  assertOpen();
+  assert (ledger.enrolledCount as Uint<32>) >= ledger.requiredJurors
+    "Not enough jurors enrolled to begin deliberation";
+  ledger.status = JuryStatus.Deliberating;
+}
+
+// Cast a private vote.
+// The actual vote (Guilty/NotGuilty) is a ZK witness — only the vote tally
+// is updated on-chain.  Observers learn that *a* vote was cast, but not
+// which way it went.
+export circuit castVote(): [] {
+  assertDeliberating();
+  const addr: Bytes<32> = callerAddress();
+  assert ledger.jurors[addr]     "Caller is not an enrolled juror";
+  assert !ledger.votedMap[addr]  "Caller has already voted";
+
+  const vote: Boolean = privateVote();
+
+  if vote {
+    increment ledger.guiltyVotes;
+  } else {
+    increment ledger.notGuiltyVotes;
+  }
+
+  ledger.votedMap[addr] = true;
+}
+
+// Finalize the verdict once every enrolled juror has voted.
+// Uses a two-thirds supermajority threshold.
+// A "Hung" verdict is recorded if no side reaches the threshold.
+export circuit finalizeVerdict(): [] {
+  assertDeliberating();
+
+  const g:  Uint<32> = ledger.guiltyVotes    as Uint<32>;
+  const ng: Uint<32> = ledger.notGuiltyVotes as Uint<32>;
+  const total: Uint<32> = g + ng;
+
+  assert total >= ledger.requiredJurors "Not all jurors have voted yet";
+
+  // ⌈2/3⌉ threshold (integer arithmetic; rounds down, favoring acquittal)
+  const threshold: Uint<32> = ledger.requiredJurors * 2 / 3;
+
+  if g >= threshold {
+    ledger.verdict = Verdict.Guilty;
+  } else {
+    if ng >= threshold {
+      ledger.verdict = Verdict.NotGuilty;
+    } else {
+      ledger.verdict = Verdict.Hung;
+    }
+  }
+
+  ledger.status = JuryStatus.Closed;
+}
+
+// ─── Composability API ────────────────────────────────────────────────────────
+//
+//  Other dApps register their canonical dapp-id (a 32-byte identifier) here.
+//  The Jury DApp records them on-chain; external tooling or off-chain watchers
+//  can then propagate the finalised verdict to each attached dApp.
+
+export circuit attachDapp(dappId: Bytes<32>): [] {
+  assert !ledger.attachedDapps[dappId] "DApp is already attached";
+  ledger.attachedDapps[dappId] = true;
+  increment ledger.dappCount;
+}
+
+export circuit detachDapp(dappId: Bytes<32>): [] {
+  assert ledger.attachedDapps[dappId] "DApp is not currently attached";
+  ledger.attachedDapps[dappId] = false;
+}
+
+// Read-only query circuits — safe to call from other dApps
+export circuit queryVerdict(): Verdict {
+  return ledger.verdict;
+}
+
+export circuit queryStatus(): JuryStatus {
+  return ledger.status;
+}
+
+export circuit queryInstructions(): Bytes<256> {
+  return ledger.juryInstructions;
+}
+
+export circuit queryInstructionsHash(): Bytes<32> {
+  return ledger.instructionsHash;
+}
+
+export circuit queryInstructionsSet(): Boolean {
+  return ledger.instructionsSet;
+}
+
+export circuit queryAcknowledgedCount(): Uint<32> {
+  return ledger.acknowledgedCount as Uint<32>;
+}
+
+export circuit queryIsDappAttached(dappId: Bytes<32>): Boolean {
+  return ledger.attachedDapps[dappId];
+}
+
+export circuit queryJurorEnrolled(addr: Bytes<32>): Boolean {
+  return ledger.jurors[addr];
+}
+
+export circuit queryHasVoted(addr: Bytes<32>): Boolean {
+  return ledger.votedMap[addr];
+}

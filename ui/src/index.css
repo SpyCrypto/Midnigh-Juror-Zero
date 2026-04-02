@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-midnight-950 text-slate-100 font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-midnight-900;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-midnight-600 rounded-full;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-midnight-900/60 border border-midnight-700/50 rounded-2xl backdrop-blur-sm;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-midnight-500/60 hover:bg-midnight-800/60;
+  }
+
+  .btn-primary {
+    @apply px-4 py-2.5 rounded-xl bg-midnight-600 hover:bg-midnight-500 
+           text-white font-medium text-sm transition-all duration-200
+           disabled:opacity-40 disabled:cursor-not-allowed
+           focus:outline-none focus:ring-2 focus:ring-midnight-400/50;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2.5 rounded-xl bg-midnight-800 hover:bg-midnight-700
+           border border-midnight-600/50 hover:border-midnight-500
+           text-slate-200 font-medium text-sm transition-all duration-200
+           disabled:opacity-40 disabled:cursor-not-allowed
+           focus:outline-none focus:ring-2 focus:ring-midnight-400/50;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2.5 rounded-xl bg-red-900/60 hover:bg-red-800/60
+           border border-red-700/50 hover:border-red-600
+           text-red-300 font-medium text-sm transition-all duration-200
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .input {
+    @apply w-full px-3.5 py-2.5 rounded-xl 
+           bg-midnight-900/80 border border-midnight-700/60
+           text-slate-100 placeholder-slate-500
+           focus:outline-none focus:ring-2 focus:ring-midnight-400/50 focus:border-midnight-500
+           transition-all duration-200 text-sm;
+  }
+
+  .label {
+    @apply block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+}

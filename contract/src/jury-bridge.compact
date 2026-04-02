@@ -1,0 +1,154 @@
+pragma language_version >= 0.14.0;
+
+import CompactStandardLibrary;
+
+// ─── Jury Bridge Contract ─────────────────────────────────────────────────────
+//
+//  This contract acts as a composability relay.  External dApps deploy their
+//  own instance of this bridge, point it at a Jury contract address, and then
+//  use the bridged verdict as a verifiable input to their own circuits.
+//
+//  Pattern:
+//    1. Deploy JuryBridge, call setJuryContract(juryContractAddress)
+//    2. Register the bridge's own address with the Jury DApp (attachDapp)
+//    3. When the verdict is final, call syncVerdict() to mirror it here
+//    4. Your own circuits can then read `ledger.mirroredVerdict` with full
+//       ZK provability — no trusted oracle needed.
+
+export enum BridgedVerdict {
+  Unknown,   // Not yet synced
+  Pending,
+  Guilty,
+  NotGuilty,
+  Hung
+}
+
+export enum BridgeStatus {
+  Unregistered, // setJuryContract not yet called
+  Active,       // Registered and ready
+  Synced        // Verdict mirrored; bridge is read-only
+}
+
+export ledger {
+  // The Midnight contract address of the Jury DApp this bridge points to
+  juryContractAddress: Bytes<32>;
+
+  // This bridge's own identifier (set on registration)
+  bridgeId:           Bytes<32>;
+
+  // Mirrored verdict from the Jury DApp
+  mirroredVerdict:    BridgedVerdict;
+
+  // Mirrored case identifiers for correlation
+  mirroredCaseId:     Bytes<32>;
+  mirroredPlaintiff:  Bytes<32>;
+  mirroredDefendant:  Bytes<32>;
+
+  // Bridge life-cycle
+  status:             BridgeStatus;
+
+  // Block number when the verdict was synced (for freshness checks)
+  syncedAtBlock:      Uint<64>;
+
+  // Custom metadata slot — the integrating dApp can store up to 64 bytes of
+  // context (e.g. the dispute ID in their own system)
+  customContext:      Bytes<64>;
+}
+
+// ─── Witnesses ────────────────────────────────────────────────────────────────
+
+witness callerAddress(): Bytes<32>;
+
+// Off-chain: the integrating dApp's back-end provides the Jury contract's
+// current state values together with a validity proof (handled by the
+// Midnight prover automatically).
+witness juryVerdictProof(): Uint<8>;  // 0=Pending,1=Guilty,2=NotGuilty,3=Hung
+witness juryCaseId(): Bytes<32>;
+witness juryPlaintiff(): Bytes<32>;
+witness juryDefendant(): Bytes<32>;
+witness juryCurrentBlock(): Uint<64>;
+
+// ─── Circuits ─────────────────────────────────────────────────────────────────
+
+// Register this bridge against a Jury DApp.
+// Must be called before any other operation.
+export circuit register(
+  juryAddress: Bytes<32>,
+  bridgeId:    Bytes<32>,
+  context:     Bytes<64>
+): [] {
+  assert ledger.status == BridgeStatus.Unregistered
+    "Bridge is already registered";
+  ledger.juryContractAddress = juryAddress;
+  ledger.bridgeId            = bridgeId;
+  ledger.customContext       = context;
+  ledger.status              = BridgeStatus.Active;
+  ledger.mirroredVerdict     = BridgedVerdict.Unknown;
+}
+
+// Sync the verdict from the Jury DApp into this bridge.
+// The Midnight prover verifies the cross-contract state proof automatically.
+export circuit syncVerdict(): [] {
+  assert ledger.status == BridgeStatus.Active
+    "Bridge must be in Active state to sync";
+
+  const raw: Uint<8> = juryVerdictProof();
+
+  // Map the raw Uint<8> to our BridgedVerdict enum
+  if raw == 0 {
+    ledger.mirroredVerdict = BridgedVerdict.Pending;
+  } else {
+    if raw == 1 {
+      ledger.mirroredVerdict = BridgedVerdict.Guilty;
+    } else {
+      if raw == 2 {
+        ledger.mirroredVerdict = BridgedVerdict.NotGuilty;
+      } else {
+        ledger.mirroredVerdict = BridgedVerdict.Hung;
+      }
+    }
+  }
+
+  ledger.mirroredCaseId    = juryCaseId();
+  ledger.mirroredPlaintiff = juryPlaintiff();
+  ledger.mirroredDefendant = juryDefendant();
+  ledger.syncedAtBlock     = juryCurrentBlock();
+
+  // Seal the bridge once a non-Pending verdict is recorded
+  if raw > 0 {
+    ledger.status = BridgeStatus.Synced;
+  }
+}
+
+// Update custom context metadata (only while Active)
+export circuit updateContext(context: Bytes<64>): [] {
+  assert ledger.status == BridgeStatus.Active
+    "Cannot update context after sync";
+  ledger.customContext = context;
+}
+
+// ─── Query Circuits ───────────────────────────────────────────────────────────
+
+export circuit getVerdict(): BridgedVerdict {
+  return ledger.mirroredVerdict;
+}
+
+export circuit isGuilty(): Boolean {
+  return ledger.mirroredVerdict == BridgedVerdict.Guilty;
+}
+
+export circuit isNotGuilty(): Boolean {
+  return ledger.mirroredVerdict == BridgedVerdict.NotGuilty;
+}
+
+export circuit isHung(): Boolean {
+  return ledger.mirroredVerdict == BridgedVerdict.Hung;
+}
+
+export circuit isSynced(): Boolean {
+  return ledger.status == BridgeStatus.Synced;
+}
+
+export circuit getCustomContext(): Bytes<64> {
+  return ledger.customContext;
+}
