@@ -1,0 +1,84 @@
+pragma language_version >= 0.20;
+import CompactStandardLibrary;
+
+// Juror Zero — Anonymous jury selection and voting on Midnight Network
+
+enum JurorStatus { Pending, Selected, Dismissed }
+enum VoteChoice { Guilty, NotGuilty, Abstain }
+enum CaseStatus { Open, Deliberating, Closed }
+
+struct JurorRecord {
+  status: JurorStatus,
+  vote_cast: Boolean,
+}
+
+export ledger case_status: CaseStatus;
+export ledger guilty_votes: Uint<32>;
+export ledger not_guilty_votes: Uint<32>;
+export ledger abstain_votes: Uint<32>;
+export ledger juror_count: Uint<32>;
+export ledger selected_count: Uint<32>;
+export ledger case_id: Uint<64>;
+export ledger nonce: Counter;
+
+constructor() {
+  case_status = CaseStatus.Open;
+  guilty_votes = 0;
+  not_guilty_votes = 0;
+  abstain_votes = 0;
+  juror_count = 0;
+  selected_count = 0;
+  case_id = 0;
+}
+
+export circuit open_case(new_case_id: Uint<64>): [] {
+  assert(case_status == CaseStatus.Closed, "Close current case first");
+  case_status = CaseStatus.Open;
+  guilty_votes = 0;
+  not_guilty_votes = 0;
+  abstain_votes = 0;
+  juror_count = 0;
+  selected_count = 0;
+  case_id = disclose(new_case_id);
+  nonce.increment(1);
+}
+
+export circuit register_juror(): [] {
+  assert(case_status == CaseStatus.Open, "Case not open for registration");
+  juror_count = (juror_count + 1) as Uint<32>;
+  nonce.increment(1);
+}
+
+export circuit select_juror(): [] {
+  assert(case_status == CaseStatus.Open, "Case not open");
+  assert(juror_count > selected_count, "No more jurors to select");
+  selected_count = (selected_count + 1) as Uint<32>;
+  nonce.increment(1);
+}
+
+export circuit begin_deliberation(): [] {
+  assert(case_status == CaseStatus.Open, "Case not open");
+  assert(selected_count > 0, "No jurors selected");
+  case_status = CaseStatus.Deliberating;
+  nonce.increment(1);
+}
+
+export circuit cast_vote(choice: Uint<8>): [] {
+  assert(case_status == CaseStatus.Deliberating, "Not in deliberation");
+  if (disclose(choice) == 0) {
+    guilty_votes = (guilty_votes + 1) as Uint<32>;
+  }
+  if (disclose(choice) == 1) {
+    not_guilty_votes = (not_guilty_votes + 1) as Uint<32>;
+  }
+  if (disclose(choice) == 2) {
+    abstain_votes = (abstain_votes + 1) as Uint<32>;
+  }
+  nonce.increment(1);
+}
+
+export circuit close_case(): [] {
+  assert(case_status == CaseStatus.Deliberating, "Not in deliberation");
+  case_status = CaseStatus.Closed;
+  nonce.increment(1);
+}

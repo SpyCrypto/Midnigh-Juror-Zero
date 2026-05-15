@@ -1,0 +1,10 @@
+{
+  "name": "@midnight-ntwrk/onchain-runtime-v3",
+  "version": "3.0.0-1am-patch",
+  "type": "module",
+  "main": "./midnight_onchain_runtime_wasm.js",
+  "module": "./midnight_onchain_runtime_wasm.js",
+  "exports": {
+    ".": "./midnight_onchain_runtime_wasm.js"
+  }
+}
